@@ -7,122 +7,11 @@ package gojvm
 //#cgo CFLAGS: -I/usr/local/include
 //#cgo LDFLAGS: -L/usr/local/lib -ljvm
 /*
-#include <stdio.h>
-#include <stdlib.h>
-#include <jni.h>
-#include <string.h>
-#include <stdbool.h>
-
-JavaVM* createJvm(char* classPath, char* xms, char* xmx, char* xmn, char* xss) {
-	JavaVM* jvm;
-	JNIEnv* env;
-	JavaVMInitArgs vm_args;
-	JavaVMOption options[5];
-
-	options[0].optionString = (char*)malloc(strlen("-Djava.class.path=") + strlen(classPath) + 1);
-	sprintf(options[0].optionString, "-Djava.class.path=%s", classPath);
-	options[1].optionString = (char*)malloc(strlen("-Xms") + strlen(xms) + 1);
-	sprintf(options[1].optionString, "-Xms%s", xms);
-	options[2].optionString = (char*)malloc(strlen("-Xmx") + strlen(xmx) + 1);
-	sprintf(options[2].optionString, "-Xmx%s", xmx);
-	options[3].optionString = (char*)malloc(strlen("-Xmn") + strlen(xmn) + 1);
-	sprintf(options[3].optionString, "-Xmn%s", xmn);
-	options[4].optionString = (char*)malloc(strlen("-Xss") + strlen(xss) + 1);
-	sprintf(options[4].optionString, "-Xss%s", xss);
-
-	vm_args.version = JNI_VERSION_1_8;
-	vm_args.nOptions = 5;
-	vm_args.options = options;
-	vm_args.ignoreUnrecognized = JNI_FALSE;
-
-	jint res = JNI_CreateJavaVM(&jvm, (void**)&env, &vm_args);
-	if (res < 0) {
-		printf("create jvm failed\n");
-		return NULL;
-	}
-	(*jvm)->DetachCurrentThread(jvm);
-	return jvm;
-}
-
-int destroyJvm(JavaVM* jvm) {
-	jint res = (*jvm)->DestroyJavaVM(jvm);
-	if (res < 0) {
-		printf("destroy jvm failed\n");
-		return 1;
-	}
-	return 0;
-}
-
-JNIEnv* attachJvm(JavaVM* jvm) {
-	JNIEnv* env;
-	jint res = (*jvm)->AttachCurrentThread(jvm, (void**)&env, NULL);
-	if (res < 0) {
-		printf("attach jvm failed\n");
-		return NULL;
-	}
-	return env;
-}
-
-void detachJvm(JavaVM* jvm) {
-	(*jvm)->DetachCurrentThread(jvm);
-}
-
-jclass findClass(JNIEnv* env, char* className) {
-	jclass cls = (*env)->FindClass(env, className);
-	if (cls == NULL) {
-		printf("find class failed\n");
-		return NULL;
-	}
-	return cls;
-}
-
-jvalue* makeParams(JNIEnv* env, int len, char** types, void** args) {
-	jvalue *v = malloc(sizeof(jvalue) * len);
-	for (int i = 0; i < len; i++) {
-		if (strcmp(types[i], "Ljava/lang/String;") == 0) {
-			v[i].l = (*env)->NewStringUTF(env, (char*)args[i]);
-		} else if (strcmp(types[i], "I") == 0) {
-			v[i].i = *((int*)args[i]);
-		}
-	}
-	return v;
-}
-
-void freeParams(JNIEnv* env, int len, char** types, jvalue* v) {
-	for (int i = 0; i < len; i++) {
-		if (strcmp(types[i], "Ljava/lang/String;") == 0) {
-			(*env)->DeleteLocalRef(env, v[i].l);
-		}
-	}
-	free(v);
-}
-
-void callStaticVoidMethod(JNIEnv* env, jclass clazz, char* methodName, char* sig, int len, char** types, void** args) {
-	jmethodID m = (*env)->GetStaticMethodID(env, clazz, methodName, sig);
-	jvalue *v = makeParams(env, len, types, args);
-	(*env)->CallStaticVoidMethodA(env, clazz, m, v);
-	freeParams(env, len, types, v);
-}
-
-jobject callStaticObjectMethod(JNIEnv* env, jclass clazz, char* methodName, char* sig, int len, char** types, void** args) {
-	jmethodID m = (*env)->GetStaticMethodID(env, clazz, methodName, sig);
-	jvalue *v = makeParams(env, len, types, args);
-	jobject jobj = (*env)->CallStaticObjectMethodA(env, clazz, m, v);
-	freeParams(env, len, types, v);
-	return jobj;
-}
-
-char* callStaticStringMethod(JNIEnv* env, jclass clazz, char* methodName, char* sig, int len, char** types, void** args) {
-	jstring jstr = callStaticObjectMethod(env, clazz, methodName, sig, len, types, args);
-	const char* str = (*env)->GetStringUTFChars(env, jstr, NULL);
-	(*env)->DeleteLocalRef(env, jstr);
-	return (char*)str;
-}
-
-
+#include "gojvm_c.h"
 */
 import "C"
 import (
+	"strings"
 	"unsafe"
 )
 
@@ -136,6 +25,13 @@ type JavaEnv struct {
 }
 
 type JavaClass struct {
+	jvm       *C.JavaVM
+	env       *C.JNIEnv
+	clazz     C.jclass
+	ClassName string
+}
+
+type JavaObject struct {
 	jvm       *C.JavaVM
 	env       *C.JNIEnv
 	clazz     C.jclass
@@ -191,7 +87,8 @@ func (env *JavaEnv) Detach() {
 }
 
 func (env *JavaEnv) FindClass(className string) *JavaClass {
-	cname := C.CString(className)
+	cn := strings.ReplaceAll(className, ".", "/")
+	cname := C.CString(cn)
 	defer C.free(unsafe.Pointer(cname))
 	clazz := C.findClass(env.env, cname)
 	if clazz == 0 {
@@ -205,47 +102,242 @@ func (env *JavaEnv) FindClass(className string) *JavaClass {
 	}
 }
 
+func (env *JavaEnv) NewObject(className string) *JavaObject {
+	jc := env.FindClass(className)
+	if jc == nil {
+		return nil
+	}
+	jo := C.newJavaObject(env.env, jc.clazz)
+	if jo == C.jobject(C.NULL) {
+		return nil
+	}
+	return &JavaObject{
+		jvm:       env.jvm,
+		env:       env.env,
+		clazz:     jc.clazz,
+		obj:       jo,
+		ClassName: className,
+	}
+}
+
 //=============================================================
 // class
 //=============================================================
 
-func (c *JavaClass) CallStaticVoidMethod(methodName string, args ...any) error {
+func (c *JavaClass) InvokeVoid(methodName string, args ...any) error {
 	types, err := ArgumentsCheck(args...)
 	if err != nil {
 		return err
 	}
-	sigStr, typArg, valArg, _ := ParseArguments(types, "Ljava/lang/String;", args...)
+	sigStr, typArg, valArg := ParseArguments(types, "Ljava/lang/String;", args...)
 	defer FreeArgs(len(args), types, typArg, valArg)
-	cmn := C.CString(methodName)
-	defer C.free(unsafe.Pointer(cmn))
-	csig := C.CString(sigStr)
-	defer C.free(unsafe.Pointer(csig))
+	cmn, csig := ParseNameSig(methodName, sigStr)
+	defer FreeNameSig(cmn, csig)
 	clen := C.int(len(args))
 	C.callStaticVoidMethod(c.env, c.clazz, cmn, csig, clen, typArg, valArg)
 	return nil
 }
 
-func (c *JavaClass) CallStaticStringMethod(methodName string, args ...any) (string, error) {
+func (c *JavaClass) InvokeString(methodName string, args ...any) (string, error) {
 	types, err := ArgumentsCheck(args...)
 	if err != nil {
 		return "", err
 	}
-	sigStr, typArg, valArg, _ := ParseArguments(types, "Ljava/lang/String;", args...)
+	sigStr, typArg, valArg := ParseArguments(types, "Ljava/lang/String;", args...)
 	defer FreeArgs(len(args), types, typArg, valArg)
-	cmn := C.CString(methodName)
-	defer C.free(unsafe.Pointer(cmn))
-	csig := C.CString(sigStr)
-	defer C.free(unsafe.Pointer(csig))
+	cmn, csig := ParseNameSig(methodName, sigStr)
+	defer FreeNameSig(cmn, csig)
 	clen := C.int(len(args))
 	ret := C.callStaticStringMethod(c.env, c.clazz, cmn, csig, clen, typArg, valArg)
+	if ret == nil {
+		return "", nil
+	}
 	defer C.free(unsafe.Pointer(ret))
 	return C.GoString(ret), nil
 }
 
-func (c *JavaClass) CallStaticSliceMethod(methodName string, args ...any) []any {
-	return []any{}
+func (c *JavaClass) InvokeInt(methodName string, args ...any) (int, error) {
+	types, err := ArgumentsCheck(args...)
+	if err != nil {
+		return 0, err
+	}
+	sigStr, typArg, valArg := ParseArguments(types, "I", args...)
+	defer FreeArgs(len(args), types, typArg, valArg)
+	cmn, csig := ParseNameSig(methodName, sigStr)
+	defer FreeNameSig(cmn, csig)
+	clen := C.int(len(args))
+	ret := C.callStaticIntMethod(c.env, c.clazz, cmn, csig, clen, typArg, valArg)
+	return int(ret), nil
 }
 
-func (c *JavaClass) CallStaticMapMethod(methodName string, args ...any) map[string]any {
-	return map[string]any{}
+func (c *JavaClass) InvokeLong(methodName string, args ...any) (int64, error) {
+	types, err := ArgumentsCheck(args...)
+	if err != nil {
+		return 0, err
+	}
+	sigStr, typArg, valArg := ParseArguments(types, "I", args...)
+	defer FreeArgs(len(args), types, typArg, valArg)
+	cmn, csig := ParseNameSig(methodName, sigStr)
+	defer FreeNameSig(cmn, csig)
+	clen := C.int(len(args))
+	ret := C.callStaticLongMethod(c.env, c.clazz, cmn, csig, clen, typArg, valArg)
+	return int64(ret), nil
+}
+
+func (c *JavaClass) InvokeShort(methodName string, args ...any) (int16, error) {
+	types, err := ArgumentsCheck(args...)
+	if err != nil {
+		return 0, err
+	}
+	sigStr, typArg, valArg := ParseArguments(types, "I", args...)
+	defer FreeArgs(len(args), types, typArg, valArg)
+	cmn, csig := ParseNameSig(methodName, sigStr)
+	defer FreeNameSig(cmn, csig)
+	clen := C.int(len(args))
+	ret := C.callStaticShortMethod(c.env, c.clazz, cmn, csig, clen, typArg, valArg)
+	return int16(ret), nil
+}
+
+func (c *JavaClass) InvokeByte(methodName string, args ...any) (uint8, error) {
+	types, err := ArgumentsCheck(args...)
+	if err != nil {
+		return 0, err
+	}
+	sigStr, typArg, valArg := ParseArguments(types, "I", args...)
+	defer FreeArgs(len(args), types, typArg, valArg)
+	cmn, csig := ParseNameSig(methodName, sigStr)
+	defer FreeNameSig(cmn, csig)
+	clen := C.int(len(args))
+	ret := C.callStaticByteMethod(c.env, c.clazz, cmn, csig, clen, typArg, valArg)
+	return uint8(ret), nil
+}
+
+func (c *JavaClass) InvokeFloat(methodName string, args ...any) (float32, error) {
+	types, err := ArgumentsCheck(args...)
+	if err != nil {
+		return 0, err
+	}
+	sigStr, typArg, valArg := ParseArguments(types, "I", args...)
+	defer FreeArgs(len(args), types, typArg, valArg)
+	cmn, csig := ParseNameSig(methodName, sigStr)
+	defer FreeNameSig(cmn, csig)
+	clen := C.int(len(args))
+	ret := C.callStaticFloatMethod(c.env, c.clazz, cmn, csig, clen, typArg, valArg)
+	return float32(ret), nil
+}
+
+func (c *JavaClass) InvokeDouble(methodName string, args ...any) (float64, error) {
+	types, err := ArgumentsCheck(args...)
+	if err != nil {
+		return 0, err
+	}
+	sigStr, typArg, valArg := ParseArguments(types, "I", args...)
+	defer FreeArgs(len(args), types, typArg, valArg)
+	cmn, csig := ParseNameSig(methodName, sigStr)
+	defer FreeNameSig(cmn, csig)
+	clen := C.int(len(args))
+	ret := C.callStaticDoubleMethod(c.env, c.clazz, cmn, csig, clen, typArg, valArg)
+	return float64(ret), nil
+}
+
+func (c *JavaClass) InvokeBoolean(methodName string, args ...any) (bool, error) {
+	types, err := ArgumentsCheck(args...)
+	if err != nil {
+		return false, err
+	}
+	sigStr, typArg, valArg := ParseArguments(types, "I", args...)
+	defer FreeArgs(len(args), types, typArg, valArg)
+	cmn, csig := ParseNameSig(methodName, sigStr)
+	defer FreeNameSig(cmn, csig)
+	clen := C.int(len(args))
+	ret := C.callStaticBooleanMethod(c.env, c.clazz, cmn, csig, clen, typArg, valArg)
+	return int(ret) != 0, nil
+}
+
+func (c *JavaClass) GetObject(fieldName string, className string) *JavaObject {
+	sig := strings.ReplaceAll(className, ".", "/")
+	cmn, csig := ParseNameSig(fieldName, "L"+sig+";")
+	defer FreeNameSig(cmn, csig)
+	ret := C.getStaticObject(c.env, c.clazz, cmn, csig)
+	if ret == C.jobject(C.NULL) {
+		return nil
+	}
+	return &JavaObject{
+		jvm:       c.jvm,
+		env:       c.env,
+		clazz:     C.findClass(c.env, C.CString(sig)),
+		obj:       ret,
+		ClassName: className,
+	}
+}
+
+func (c *JavaClass) SetObject(fieldName string, className string, obj *JavaObject) {
+	sig := strings.ReplaceAll(className, ".", "/")
+	cmn, csig := ParseNameSig(fieldName, "L"+sig+";")
+	defer FreeNameSig(cmn, csig)
+	C.setStaticObject(c.env, c.clazz, cmn, csig, obj.obj)
+}
+
+func (c *JavaClass) GetString(fieldName string) string {
+	cmn := C.CString(fieldName)
+	defer C.free(unsafe.Pointer(cmn))
+	ret := C.getStaticString(c.env, c.clazz, cmn)
+	if ret == nil {
+		return ""
+	}
+	defer C.free(unsafe.Pointer(ret))
+	return C.GoString(ret)
+}
+
+func (c *JavaClass) SetString(fieldName string, value string) {
+	cmn := C.CString(fieldName)
+	defer C.free(unsafe.Pointer(cmn))
+	cval := C.CString(value)
+	defer C.free(unsafe.Pointer(cval))
+	C.setStaticString(c.env, c.clazz, cmn, cval)
+}
+
+func (c *JavaClass) GetInt(fieldName string) int {
+	cmn := C.CString(fieldName)
+	defer C.free(unsafe.Pointer(cmn))
+	ret := C.getStaticInt(c.env, c.clazz, cmn)
+	return int(ret)
+}
+
+func (c *JavaClass) SetInt(fieldName string, value int) {
+	cmn := C.CString(fieldName)
+	defer C.free(unsafe.Pointer(cmn))
+	C.setStaticInt(c.env, c.clazz, cmn, C.int(value))
+}
+
+func (c *JavaClass) Free() {
+	C.freeJavaClassRef(c.env, c.clazz)
+}
+
+//=============================================================
+// class
+//=============================================================
+
+func (o *JavaObject) Free() {
+	C.freeJavaClassRef(o.env, o.clazz)
+	C.freeJavaObject(o.env, o.obj)
+}
+
+func (o *JavaObject) GetString(fieldName string) string {
+	cmn := C.CString(fieldName)
+	defer C.free(unsafe.Pointer(cmn))
+	ret := C.getObjString(o.env, o.clazz, o.obj, cmn)
+	if ret == nil {
+		return ""
+	}
+	defer C.free(unsafe.Pointer(ret))
+	return C.GoString(ret)
+}
+
+func (o *JavaObject) SetString(fieleName string, value string) {
+	cmn := C.CString(fieleName)
+	defer C.free(unsafe.Pointer(cmn))
+	cval := C.CString(value)
+	defer C.free(unsafe.Pointer(cval))
+	C.setObjString(o.env, o.clazz, o.obj, cmn, cval)
 }

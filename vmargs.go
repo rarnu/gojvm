@@ -32,66 +32,6 @@ func ArgumentsCheck(args ...any) ([]string, error) {
 			types = append(types, "D")
 		} else if t == "string" {
 			types = append(types, "Ljava/lang/String;")
-		} else if strings.HasPrefix(t, "[]") {
-			// 数组
-			subType := t[2:]
-			subStr := ""
-			if subType == "bool" {
-				subStr = "Z"
-			} else if subType == "uint8" {
-				subStr = "B"
-			} else if subType == "int16" {
-				subStr = "S"
-			} else if subType == "int64" {
-				subStr = "J"
-			} else if subType == "float32" {
-				subStr = "F"
-			} else if subType == "float64" {
-				subStr = "D"
-			} else if subType == "string" {
-				subStr = "Ljava/lang/String;"
-			} else if strings.Contains(subType, "[]") {
-				err = fmt.Errorf("sub array type error: %s", t)
-				return nil, err
-			} else if strings.Contains(subType, "map[") {
-				err = fmt.Errorf("sub map type error: %s", t)
-				return nil, err
-			} else if strings.Contains(subType, "int") {
-				subStr = "I"
-			}
-			types = append(types, "Ljava/util/List;|"+subStr)
-		} else if strings.HasSuffix(t, "map[") {
-			keyType := t[4:strings.Index(t, "]")]
-			if keyType != "string" {
-				err = fmt.Errorf("map key type must be string")
-				return nil, err
-			}
-			valType := t[strings.Index(t, "]")+1:]
-			valStr := ""
-			if valType == "bool" {
-				valStr = "Z"
-			} else if valType == "uint8" {
-				valStr = "B"
-			} else if valType == "int16" {
-				valStr = "S"
-			} else if valType == "int64" {
-				valStr = "J"
-			} else if valType == "float32" {
-				valStr = "F"
-			} else if valType == "float64" {
-				valStr = "D"
-			} else if valType == "string" {
-				valStr = "Ljava/lang/String;"
-			} else if strings.Contains(valType, "[]") {
-				err = fmt.Errorf("sub array type error: %s", t)
-				return nil, err
-			} else if strings.Contains(valType, "map[") {
-				err = fmt.Errorf("sub map type error: %s", t)
-				return nil, err
-			} else if strings.Contains(valType, "int") {
-				valStr = "I"
-			}
-			types = append(types, "Ljava/util/Map;|"+valStr)
 		} else if strings.Contains(t, "int") {
 			types = append(types, "I")
 		} else {
@@ -101,7 +41,7 @@ func ArgumentsCheck(args ...any) ([]string, error) {
 	return types, err
 }
 
-func ParseArguments(types []string, retType string, args ...any) (string, **C.char, *unsafe.Pointer, *C.jvalue) {
+func ParseArguments(types []string, retType string, args ...any) (string, **C.char, *unsafe.Pointer) {
 	size := C.size_t(unsafe.Sizeof((*C.char)(nil)))
 	clen := C.size_t(len(args))
 	typesArg := (**C.char)(C.malloc(size * clen))
@@ -142,23 +82,10 @@ func ParseArguments(types []string, retType string, args ...any) (string, **C.ch
 		} else if t == "B" {
 			bi := C.uchar(args[i].(uint8))
 			argArgView[i] = unsafe.Pointer(&bi)
-		} else if strings.HasPrefix(t, "Ljava/util/List;") {
-			// TODO: list
-			subType := t[strings.Index(t, "|")+1:]
-			if subType == "Ljava/lang/String;" {
-				// li := args[i].([]string)
-			}
-
-		} else if strings.HasPrefix(t, "Ljava/util/Map;") {
-			valType := t[strings.Index(t, "]")+1:]
-			// TODO: map
-			if valType == "Ljava/lang/String;" {
-				//
-			}
 		}
 	}
 	sigStr += ")" + retType
-	return sigStr, typesArg, argArg, nil
+	return sigStr, typesArg, argArg
 }
 
 func FreeArgs(size int, types []string, typesArg **C.char, valArgs *unsafe.Pointer) {
@@ -168,12 +95,19 @@ func FreeArgs(size int, types []string, typesArg **C.char, valArgs *unsafe.Point
 		C.free(unsafe.Pointer(typView[i]))
 		if types[i] == "Ljava/lang/String;" {
 			C.free(valView[i])
-		} else if strings.HasPrefix(types[i], "Ljava/util/List;") {
-			C.free(valView[i])
-		} else if strings.HasPrefix(types[i], "Ljava/util/Map;") {
-			C.free(valView[i])
 		}
 	}
 	C.free(unsafe.Pointer(typesArg))
 	C.free(unsafe.Pointer(valArgs))
+}
+
+func ParseNameSig(name string, sig string) (*C.char, *C.char) {
+	nameC := C.CString(name)
+	sigC := C.CString(sig)
+	return nameC, sigC
+}
+
+func FreeNameSig(nameC *C.char, sigC *C.char) {
+	C.free(unsafe.Pointer(nameC))
+	C.free(unsafe.Pointer(sigC))
 }

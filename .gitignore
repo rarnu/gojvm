@@ -20,4 +20,5 @@
 
 *.java
 *.class
+cmake-build-debug/
 
