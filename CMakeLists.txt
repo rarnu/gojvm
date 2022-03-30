@@ -12,6 +12,7 @@ set(SRCS
 
 set(HDRS
     gojvm_c.h
+    gojvm_wrap.h
 )
 
 add_library(gojvm ${SRCS} ${HDRS})
