@@ -10,7 +10,6 @@
 
 JavaVM* createJvm(char* classPath, char* xms, char* xmx, char* xmn, char* xss);
 int destroyJvm(JavaVM* jvm);
-int destroyJvm(JavaVM* jvm);
 JNIEnv* attachJvm(JavaVM* jvm);
 void detachJvm(JavaVM* jvm);
 jclass findClass(JNIEnv* env, char* className);
